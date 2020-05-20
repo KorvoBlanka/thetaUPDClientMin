@@ -12,6 +12,10 @@ namespace UDPClient
 {
     class Program
     {
+
+        const ushort announcePort = 16061;
+        //const string thetaNetName = "ttracker.local";
+
         const ushort thetaPort = 19920;
         const string thetaNetName = "ttracker.local";
 
@@ -123,28 +127,63 @@ namespace UDPClient
             }
         }
 
+
+        public static void OnDataCallback(IAsyncResult result)
+        {
+            UdpClient socket = result.AsyncState as UdpClient;
+            IPEndPoint source = new IPEndPoint(0, 0);
+            byte[] data = socket.EndReceive(result, ref source);
+
+            parsePacket(data);
+
+            //Console.WriteLine("Got " + message.Length + " bytes from " + source);
+            socket.BeginReceive(new AsyncCallback(OnDataCallback), socket);
+        }
+
+
+        public static void OnAnnounceCallback(IAsyncResult result)
+        {
+            UdpClient socket = result.AsyncState as UdpClient;
+            IPEndPoint source = new IPEndPoint(0, 0);
+            byte[] announce = socket.EndReceive(result, ref source);
+            Console.WriteLine("Got " + announce.Length + " bytes from " + source);
+            // parse json
+
+            socket.BeginReceive(new AsyncCallback(OnAnnounceCallback), socket);
+        }
+
         static void Main(string[] args)
         {
-            UdpClient client = new UdpClient();
-            client.Connect(thetaNetName, thetaPort);
+            //
+            IPEndPoint announceAddress = new IPEndPoint(IPAddress.Any, announcePort);
+            UdpClient announceClient = new UdpClient();
+            announceClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+            announceClient.ExclusiveAddressUse = false;
+            announceClient.Client.Bind(announceAddress);
+            announceClient.BeginReceive(new AsyncCallback(OnAnnounceCallback), announceClient);
 
-            byte[] rqPacket = Encoding.ASCII.GetBytes("drq111");
 
             // drq - data request
             // 1 - data 
             // 1 - ext data (debug)
             // 1 - mapping, mapping will be sent once
+            byte[] rqPacket = Encoding.ASCII.GetBytes("drq111");
+            UdpClient thetaClient = new UdpClient();
+            thetaClient.Connect(thetaNetName, thetaPort);
 
-            client.Send(rqPacket, rqPacket.Length);
+            // надо посылать drqnnn не реже 1 раз в 60 сек, чтобы тета не посчитала что клиент сдох
+            thetaClient.BeginReceive(new AsyncCallback(OnDataCallback), thetaClient);
 
-            while (1 != 2) {
-
-                IPEndPoint ipEndpoint = new IPEndPoint(IPAddress.Any, 0);
-                rcvBuf = client.Receive(ref ipEndpoint);
-
-                parsePacket(rcvBuf);
-
+            // посылаем запрос по нажатию клавиши, данные будут приходить следующие 60 сек 
+            // q для выхода
+            while (Console.ReadKey().Key != ConsoleKey.Q)
+            {
+                thetaClient.Send(rqPacket, rqPacket.Length);
             }
         }
     }
 }
+
+
+// анонс выглядит следующим образом
+// {"available_rev":"","cmd_srv_ver":"0.2.3","current_rev":"","data_mc_group":"239.255.255.252:6000","dbg_mc_group":"239.255.255.253:6001","info_mc_group":"239.255.255.251:5999","log_mc_group":"239.255.255.152:16062","theta_ver":"-1"}
